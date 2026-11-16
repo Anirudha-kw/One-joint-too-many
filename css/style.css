@@ -107,7 +107,11 @@ body {
   line-height: 1.62;
   font-optical-sizing: auto;
 }
-main { padding: 0 16px 96px; }
+main {
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-bottom: 96px;
+}
 main > * { max-width: var(--measure); margin-left: auto; margin-right: auto; }
 a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
 a:hover { text-decoration-thickness: 2px; }

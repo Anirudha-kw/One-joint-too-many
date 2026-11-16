@@ -11,10 +11,14 @@ let meshPromise = null;
 // Loads assets/fr3_meshes.{json,bin} (written by tools/build_web_assets.py) once.
 export function loadMeshes(base = "assets/") {
   if (!meshPromise) {
-    meshPromise = Promise.all([
-      fetch(base + "fr3_meshes.json").then((r) => r.json()),
-      fetch(base + "fr3_meshes.bin").then((r) => r.arrayBuffer()),
-    ]).then(([manifest, buf]) =>
+    // The binary either sits next to the manifest (fr3_meshes.bin) or is embedded in it as base64
+    // (manifest.binBase64), for hosts that don't serve .bin files.
+    meshPromise = fetch(base + "fr3_meshes.json").then((r) => r.json()).then((manifest) =>
+      (manifest.binBase64
+        ? Promise.resolve(Uint8Array.from(atob(manifest.binBase64), (c) => c.charCodeAt(0)).buffer)
+        : fetch(base + "fr3_meshes.bin").then((r) => r.arrayBuffer())
+      ).then((buf) => [manifest, buf])
+    ).then(([manifest, buf]) =>
       manifest.parts.map((p) => {
         const qv = new Uint16Array(buf, p.positionOffset, p.vertexCount * 3);
         const idx = new Uint16Array(buf, p.indexOffset, p.indexCount);

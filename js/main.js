@@ -4,7 +4,10 @@ import { Scene3D, Robot, loadMeshes, webglAvailable, setArrow } from "./viewer.j
 import { TimePlot, drawJointBars, drawHeatmap, css } from "./plot.js";
 import * as F from "./fr3core.js";
 
-const MUJOCO_URL = "https://cdn.jsdelivr.net/npm/@mujoco/mujoco@4.0.1/mujoco.js";
+// Pages can set window.MUJOCO_URL to a self-hosted copy (mujoco.wasm must sit next to it).
+const MUJOCO_URL = window.MUJOCO_URL
+  ? new URL(window.MUJOCO_URL, document.baseURI).href
+  : "https://cdn.jsdelivr.net/npm/@mujoco/mujoco@4.0.1/mujoco.js";
 const READY = [0, -Math.PI / 4, 0, (-3 * Math.PI) / 4, 0, Math.PI / 2, Math.PI / 4];
 const HOME = [0, 0, 0, -1.57079, 0, 1.57079, -0.7853];
 const DEG = 180 / Math.PI;
@@ -612,7 +615,7 @@ async function boot() {
       fetch("models/fr3_torque.xml").then((r) => r.text()),
       fetch("models/fr3_position.xml").then((r) => r.text()),
     ]);
-    MJ = await mod.default();
+    MJ = await mod.default({ locateFile: (p) => new URL(p, MUJOCO_URL).href });
     PARTS = parts; XML_T = xt; XML_P = xp;
   } catch (e) {
     console.error(e);
