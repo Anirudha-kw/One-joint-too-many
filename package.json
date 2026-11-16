@@ -1,0 +1,8 @@
+{
+  "name": "fr3-reaching",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@mujoco/mujoco": "4.0.1"
+  }
+}

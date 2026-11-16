@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>One Joint Too Many</title>
+  <meta name="description" content="Redundancy, dynamics and torque control of the Franka Research 3, with MuJoCo running live in the browser.">
+  <script>
+    try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+<button class="theme-toggle" type="button" aria-label="Toggle dark mode">Theme</button>
+
+<main>
+  <header class="masthead">
+    <p class="kicker">Interactive notes · Robot arms, part 2</p>
+    <h1>One joint too many</h1>
+    <p class="dek">Redundancy, dynamics and torque control of the Franka Research&nbsp;3, with MuJoCo running live in every figure.</p>
+    <div class="byline">
+      <div><span class="label">Author</span>Your Name</div>
+      <div><span class="label">Published</span>November 16, 2026</div>
+      <div><span class="label">Code</span><a href="#try-it">Models and scripts</a></div>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="Contents">
+    <ol>
+      <li><a href="#fr3">The FR3</a></li>
+      <li><a href="#redundancy">Seven joints, six numbers</a></li>
+      <li><a href="#diff-ik">Following a path</a></li>
+      <li><a href="#dynamics">What the motors feel</a></li>
+      <li><a href="#control">Torque control</a></li>
+      <li><a href="#integrators">Stiff actuators and integrators</a></li>
+      <li><a href="#try-it">Try it yourself</a></li>
+      <li><a href="#caveats">What the model leaves out</a></li>
+    </ol>
+  </nav>
+
+  <p>
+    A hand in space has six numbers to get right: three for position and three for orientation. The Franka Research 3 (FR3) has
+    seven joints. The extra one means most hand poses can be reached by a whole family of arm configurations, which
+    makes the arm flexible and its algorithms subtle. This post works through what that extra joint changes, from inverse kinematics
+    to torque control, on a model of the real robot.
+  </p>
+  <p>
+    Every figure runs <a href="https://mujoco.org">MuJoCo</a>&nbsp;[<a href="#ref-mujoco">1</a>] in your browser through its official
+    WebAssembly build, using the FR3 model from MuJoCo Menagerie&nbsp;[<a href="#ref-menagerie">2</a>]. The browser build and MuJoCo's
+    Python bindings give bit-identical results on this model, and every number in the text comes from the same JavaScript the
+    figures run (see <a href="#try-it">Try it yourself</a>).
+  </p>
+
+  <h2 id="fr3">The FR3</h2>
+  <p>
+    The FR3 is a 7-joint arm that is widely used in research. It has a torque sensor in every joint and an interface that
+    accepts joint torques at 1&nbsp;kHz&nbsp;[<a href="#ref-haddadin">3</a>], which makes it a natural platform for the
+    torque controllers later in this post. Franka lists a 3&nbsp;kg payload and 855&nbsp;mm reach. The model used here is the arm
+    alone, without the gripper, with Menagerie's fitted joint damping, friction and motor inertia.
+  </p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Joint</th><th class="num">Range</th><th class="num">Torque limit</th><th class="num">Motor inertia</th><th class="num">Friction</th></tr></thead>
+      <tbody>
+        <tr><td>1, 3</td><td class="num">±166.2°</td><td class="num">87 N·m</td><td class="num">0.195 kg·m²</td><td class="num">1.14 N·m</td></tr>
+        <tr><td>2</td><td class="num">±105.2°</td><td class="num">87 N·m</td><td class="num">0.195 kg·m²</td><td class="num">1.14 N·m</td></tr>
+        <tr><td>4</td><td class="num">−176.3° to −6.7°</td><td class="num">87 N·m</td><td class="num">0.195 kg·m²</td><td class="num">1.14 N·m</td></tr>
+        <tr><td>5</td><td class="num">±164.8°</td><td class="num">12 N·m</td><td class="num">0.074 kg·m²</td><td class="num">0.76 N·m</td></tr>
+        <tr><td>6</td><td class="num">25.2° to 264.8°</td><td class="num">12 N·m</td><td class="num">0.074 kg·m²</td><td class="num">0.44 N·m</td></tr>
+        <tr><td>7</td><td class="num">±174.8°</td><td class="num">12 N·m</td><td class="num">0.074 kg·m²</td><td class="num">0.25 N·m</td></tr>
+      </tbody>
+      <caption>From the Menagerie model. Motor inertia is MuJoCo's <code>armature</code>: rotor inertia reflected through the gearbox.</caption>
+    </table>
+  </div>
+
+  <h2 id="redundancy">Seven joints, six numbers</h2>
+  <p>
+    The chain alternates between joints that swing a link and joints that twist it. Joint 4 is the elbow, and joints 5–7 form the wrist. Two details matter for
+    what follows. First, joints 1 and 3 share an axis whenever joint 2 is at zero, as in Menagerie's default "home" pose. At that pose the
+    shoulder can only spin the upper arm about its own axis, so this post works from Franka's usual ready pose,
+    \(q = (0, -\tfrac{\pi}{4}, 0, -\tfrac{3\pi}{4}, 0, \tfrac{\pi}{2}, \tfrac{\pi}{4})\), instead. Second, the elbow and wrist are
+    offset by 8.25&nbsp;cm and 8.8&nbsp;cm, so the textbook spherical-wrist solution does not apply. The FR3's inverse kinematics has
+    no simple closed form. Analytical solvers exist, but they fix one joint angle and solve for the rest&nbsp;[<a href="#ref-he">4</a>].
+  </p>
+
+  <figure class="interactive" id="fig-chain">
+    <p class="fig-status" hidden></p>
+    <div class="fig-body"><div class="view" aria-label="3D view of the FR3. Drag to orbit, scroll to zoom."></div></div>
+    <div class="controls">
+      <div class="joint-sliders"></div>
+      <span class="seg" data-name="pose">
+        <button type="button" data-value="ready" aria-pressed="true">Ready</button>
+        <button type="button" data-value="home" aria-pressed="false">Menagerie home</button>
+        <button type="button" data-value="reach" aria-pressed="false">Reaching</button>
+      </span>
+      <label><input type="checkbox" name="axes" checked> joint axes</label>
+      <button type="button" name="view">Reset view</button>
+    </div>
+    <div class="readout"></div>
+    <figcaption>
+      <span class="fig-num">Figure 1.</span>
+      The FR3 with its seven joint axes, colored to match the sliders. Drag to orbit and scroll to zoom. Switch to
+      <em>Menagerie home</em> and note that the red and yellow axes (joints 1 and 3) line up. The triad marks the flange frame,
+      where a tool would be bolted on.
+    </figcaption>
+  </figure>
+
+  <p>
+    The Jacobian \(J(q)\) maps the seven joint velocities to the hand's six-dimensional twist \(\dot{\mathbf{x}} = J\dot q\).
+    With six rows and seven columns, \(J\) has at least a one-dimensional <strong>null space</strong>: joint velocities that
+    move the arm without moving the hand. Following that direction traces out the <strong>self-motion</strong>, a curve of
+    configurations that all put the hand in exactly the same pose.
+  </p>
+
+  <figure class="interactive" id="fig-selfmotion">
+    <p class="fig-status" hidden></p>
+    <div class="fig-body split">
+      <div class="view" aria-label="FR3 moving along its self-motion with the hand fixed"></div>
+      <div class="panel">
+        <canvas class="manip" aria-label="Manipulability along the self-motion"></canvas>
+        <canvas class="bars" aria-label="Joint positions within limits"></canvas>
+      </div>
+    </div>
+    <div class="controls">
+      <label>position along the self-motion <input class="wide" type="range" name="s" min="0" max="100" step="1" value="50"></label>
+      <button type="button" name="play">Sweep</button>
+    </div>
+    <div class="readout"></div>
+    <figcaption>
+      <span class="fig-num">Figure 2.</span>
+      The hand stays at the ready pose while the arm moves through its self-motion. The blue curve is the path of the elbow,
+      and the faint arms are the two ends, where joint 6 reaches its limit. The configurations were traced by following the null
+      space of \(J\) from the ready pose and correcting the hand pose at every step.
+    </figcaption>
+  </figure>
+
+  <p>
+    For the ready pose, the self-motion runs 7.3&nbsp;rad through joint space, measured as path length, before joint 6 hits its limit at either end. Along the way the
+    shoulder swings through ±136° while the hand stays fixed to well under a micrometre. Not all of these configurations are equally good.
+    Manipulability, \(\sqrt{\det J J^\top}\)&nbsp;[<a href="#ref-yoshikawa">5</a>], falls from 0.080 at the ready pose to 0.057 at the ends,
+    and several joints end up near their limits. The redundancy is a resource, and the next section shows what happens if
+    nothing manages it.
+  </p>
+
+  <h2 id="diff-ik">Following a path</h2>
+  <p>
+    To make the hand follow a moving target, differential IK turns a desired hand twist into joint velocities. The standard tool is
+    <strong>damped least squares</strong>&nbsp;[<a href="#ref-wampler">6</a>, <a href="#ref-nakamura">7</a>]:
+  </p>
+  $$
+  \dot q = J^\top\!\left(J J^\top + \lambda^2 I\right)^{-1} \big(\dot{\mathbf{x}}_d + K e\big) \;+\; \big(I - J^{+} J\big)\, \dot q_0 ,
+  $$
+  <p>
+    where \(e\) is the six-dimensional pose error, \(\lambda\) keeps steps bounded near singularities, and \(J^{+}\) is the damped
+    pseudo-inverse. The first term picks the smallest joint motion that moves the hand correctly. The second term is optional: it
+    takes any desired joint motion \(\dot q_0\) and keeps only the part the hand cannot feel. A common choice is a pull toward a
+    comfortable posture, \(\dot q_0 = k_0 (q_{\text{ready}} - q)\).
+  </p>
+  <p>
+    Without the second term, the null space is left to chance. The minimum-norm solution is not <em>cyclic</em>: when the hand traces a
+    closed loop, the joints generally do not come back to where they started&nbsp;[<a href="#ref-klein">8</a>].
+  </p>
+
+  <figure class="interactive" id="fig-drift">
+    <p class="fig-status" hidden></p>
+    <div class="fig-body">
+      <div class="view" aria-label="Two FR3 arms tracing the same circle with different IK">
+        <div class="view-labels"><span>pseudo-inverse only</span><span>with null-space posture</span></div>
+      </div>
+    </div>
+    <div class="bars-pair"><canvas class="bars-a"></canvas><canvas class="bars-b"></canvas></div>
+    <div class="controls">
+      <span>lap time</span>
+      <span class="seg" data-name="period">
+        <button type="button" data-value="2" aria-pressed="true">2 s</button>
+        <button type="button" data-value="3" aria-pressed="false">3 s</button>
+      </span>
+      <span>speed</span>
+      <span class="seg" data-name="speed">
+        <button type="button" data-value="1" aria-pressed="true">1×</button>
+        <button type="button" data-value="4" aria-pressed="false">4×</button>
+      </span>
+      <button type="button" name="reset">Restart</button>
+    </div>
+    <div class="readout"></div>
+    <figcaption>
+      <span class="fig-num">Figure 3.</span>
+      Both arms trace the same 0.2&nbsp;m circle with fixed hand orientation, using the same damped-least-squares IK at 500&nbsp;Hz.
+      Joints stop at their limits, as on the real robot. The right arm adds the posture term. The bars show each joint's position
+      within its range and turn red within 3% of a limit. Readouts list left | right.
+    </figcaption>
+  </figure>
+
+  <p>
+    With a 2&nbsp;s lap, the plain solver's configuration has already shifted 23° by the end of lap 2. In lap 5, joint 2 runs into its limit at
+    8.3&nbsp;s. The hand then misses the circle by up to 90&nbsp;mm, and the arm settles into a different, worse cycle 95° from the first.
+    With the posture term, the error stays under 1.3&nbsp;mm and the pose at the end of each lap changes by 0.1° across 20 laps. One line of
+    code makes the difference.
+  </p>
+
+  <h2 id="dynamics">What the motors feel</h2>
+  <p>
+    Torque control needs the dynamics:
+  </p>
+  $$
+  \big(M_{\text{links}}(q) + I_a\big)\,\ddot q + c(q,\dot q) + g(q) = \tau - \tau_{\text{friction}} - B\dot q .
+  $$
+  <p>
+    The \(7\times7\) mass matrix now has strong off-diagonal coupling, and its diagonal has a second, constant part, \(I_a\).
+    A geared motor's rotor spins \(N\) times faster than the joint, so its inertia appears at the joint multiplied by \(N^2\). At the ready
+    pose the rotors add 11–28% to the diagonal entries of joints 1–4. For the wrist they dominate, accounting for 73%, 71% and 100% of the
+    effective inertia of joints 5, 6 and 7. Joint 7's link is a thin disk spinning about its own axis, so almost everything the
+    motor accelerates is its own rotor.
+  </p>
+
+  <figure class="interactive" id="fig-dynamics">
+    <p class="fig-status" hidden></p>
+    <div class="fig-body split">
+      <div class="view" aria-label="FR3 in a chosen pose with an optional payload"></div>
+      <div class="panel">
+        <canvas class="heat" aria-label="Mass matrix heatmap"></canvas>
+        <canvas class="grav" aria-label="Gravity torque relative to limits"></canvas>
+      </div>
+    </div>
+    <div class="controls">
+      <span class="seg" data-name="pose">
+        <button type="button" data-value="ready" aria-pressed="true">Ready</button>
+        <button type="button" data-value="home" aria-pressed="false">Home</button>
+        <button type="button" data-value="reach" aria-pressed="false">Reaching</button>
+        <button type="button" data-value="stretched" aria-pressed="false">Stretched</button>
+      </span>
+      <label>q₂ <input type="range" name="dq2" min="-105" max="105" step="1" value="-45"><output for="dq2"></output></label>
+      <label>q₄ <input type="range" name="dq4" min="-176" max="-7" step="1" value="-135"><output for="dq4"></output></label>
+      <label>payload <input type="range" name="payload" min="0" max="5" step="0.25" value="0"><output for="payload"></output></label>
+      <label><input type="checkbox" name="armature" checked> include motor inertia</label>
+    </div>
+    <div class="readout"></div>
+    <figcaption>
+      <span class="fig-num">Figure 4.</span>
+      The mass matrix and the torque each joint needs to hold the arm still, as a fraction of its limit (the red tick is 100%).
+      Untick <em>include motor inertia</em> to see the links' contribution alone, and watch the wrist diagonal nearly vanish. The payload
+      is a point mass 5&nbsp;cm beyond the flange.
+    </figcaption>
+  </figure>
+
+  <p>
+    Gravity sets the static budget. At the ready pose the arm is folded and joint 4 carries the most load, 19&nbsp;N·m or 22% of its limit.
+    Stretched out horizontally, joint 2 needs 51&nbsp;N·m (58%), and a payload pushes it past its 87&nbsp;N·m limit at about 4.75&nbsp;kg.
+    That is comfortably above the rated 3&nbsp;kg, and the margin is what remains for accelerating the arm.
+  </p>
+
+  <h2 id="control">Torque control</h2>
+  <p>
+    With torques available, there are three common ways to move the hand. All three add the model's gravity and Coriolis terms,
+    \(c + g\), to the torque they command.
+  </p>
+  <ul>
+    <li><strong>Joint impedance:</strong> run the IK above to get a joint trajectory, then make each joint a spring-damper,
+      \(\tau = K_q(q_d - q) - D_q\dot q + c + g\).</li>
+    <li><strong>Cartesian impedance</strong>&nbsp;[<a href="#ref-ott">9</a>]: put the spring at the hand. A pose error \(e\) produces a
+      wrench, and \(J^\top\) maps it to joint torques: \(\tau = J^\top\!\big(K e - D\dot{\mathbf{x}}\big) + c + g + \tau_{\text{null}}\).</li>
+    <li><strong>Operational-space control</strong>&nbsp;[<a href="#ref-khatib">10</a>]: also cancel the arm's inertia as seen at the hand,
+      \(\Lambda = (J M^{-1} J^\top)^{-1}\), so every direction responds the same way:
+      \(\tau = J^\top \Lambda\big(\ddot{\mathbf{x}}_d + \omega^2 e + 2\omega\dot e\big) + c + g + \tau_{\text{null}}\).</li>
+  </ul>
+  <p>
+    The null-space torque \(\tau_{\text{null}}\) plays the role of the posture term in IK. It is a joint-space spring toward the ready pose,
+    projected so that it does not disturb the hand. For operational-space control the projection is weighted by \(M\), the
+    "dynamically consistent" version&nbsp;[<a href="#ref-khatib">10</a>].
+  </p>
+
+  <figure class="interactive" id="fig-control">
+    <p class="fig-status" hidden></p>
+    <div class="fig-body split">
+      <div class="view" aria-label="Torque-controlled FR3 tracking a target"></div>
+      <div class="panel">
+        <canvas class="err" aria-label="Hand error plot"></canvas>
+        <canvas class="tau" aria-label="Joint torque plot"></canvas>
+        <div class="legend">
+          <span><i style="background:#e15759"></i>q1</span><span><i style="background:#f28e2b"></i>q2</span><span><i style="background:#d4a72c"></i>q3</span><span><i style="background:#59a14f"></i>q4</span><span><i style="background:#4e79a7"></i>q5</span><span><i style="background:#b07aa1"></i>q6</span><span><i style="background:#5fb0a8"></i>q7</span>
+        </div>
+      </div>
+    </div>
+    <div class="controls">
+      <span class="seg" data-name="kind">
+        <button type="button" data-value="ji" aria-pressed="false">Joint impedance</button>
+        <button type="button" data-value="ci" aria-pressed="false">Cartesian impedance</button>
+        <button type="button" data-value="osc" aria-pressed="true">Operational space</button>
+      </span>
+      <span class="seg" data-name="motion">
+        <button type="button" data-value="circle" aria-pressed="true">Circle</button>
+        <button type="button" data-value="hold" aria-pressed="false">Hold</button>
+      </span>
+      <label>unmodeled payload <input type="range" name="payload" min="0" max="2" step="0.1" value="0"><output for="payload"></output></label>
+      <label><input type="checkbox" name="nullspace" checked> null-space posture</label>
+      <button type="button" name="push-hand">Push hand (30 N)</button>
+      <button type="button" name="push-elbow">Push elbow (20 N)</button>
+      <button type="button" name="reset">Reset</button>
+    </div>
+    <div class="readout"></div>
+    <figcaption>
+      <span class="fig-num">Figure 5.</span>
+      A full dynamic simulation at 1&nbsp;kHz, with torques clipped to the FR3's limits. The target traces a 0.15&nbsp;m circle every
+      3&nbsp;s. The controllers use the nominal model, so the payload slider adds mass they do not know about. The pushes last 0.5&nbsp;s.
+      <em>Hold</em> brings the hand back to the ready pose. Untick the null-space posture there and push the elbow to see the null space
+      with nothing controlling it.
+    </figcaption>
+  </figure>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Controller</th><th class="num">Tracking (max)</th><th class="num">RMS</th><th class="num">+1 kg unmodeled</th><th class="num">30 N push on hand</th></tr></thead>
+      <tbody>
+        <tr><td>Joint impedance</td><td class="num">28.4 mm</td><td class="num">25.8 mm</td><td class="num">31.7 mm</td><td class="num">48.7 mm</td></tr>
+        <tr><td>Cartesian impedance</td><td class="num">20.9 mm</td><td class="num">13.2 mm</td><td class="num">38.7 mm</td><td class="num">59.6 mm</td></tr>
+        <tr><td>Operational space</td><td class="num">2.9 mm</td><td class="num">1.8 mm</td><td class="num">6.9 mm</td><td class="num">17.2 mm</td></tr>
+      </tbody>
+      <caption>Gains: joint impedance K = (600, 600, 600, 600, 250, 150, 50) N·m/rad; Cartesian impedance 600 N/m and 30 N·m/rad,
+        critically damped; operational space ω = 20 rad/s. The push column is peak deviation while tracking.</caption>
+    </table>
+  </div>
+  <p>
+    The impedance controllers lag the moving target because they only react to error. Operational-space control feeds forward the
+    target's acceleration through \(\Lambda\), so it tracks an order of magnitude better and is also stiffer against the push. Stiffness is not always
+    the goal, though. A Cartesian impedance controller's hand behaves like a spring you chose, which is exactly what you want for contact and for
+    working around people. The unmodeled payload hurts every controller, because each one relies on the model's \(g(q)\).
+  </p>
+  <p>
+    The elbow push isolates the null space. With the hand held still, a 20&nbsp;N push on the elbow for 0.5&nbsp;s under
+    operational-space control moves the elbow 106&nbsp;mm when there is no null-space term, and it stays there. Nothing pulls it back, and joint friction holds it.
+    With the posture term the elbow moves only 9&nbsp;mm and returns to within 4&nbsp;mm, while the hand moves 1&nbsp;mm. The residual offset is friction again.
+    About 1&nbsp;N·m of friction per joint can resist a soft posture spring, and the residual shrank from 16&nbsp;mm to 2&nbsp;mm as the null-space
+    stiffness went from 10 to 60&nbsp;N·m/rad.
+  </p>
+  <p>
+    The pose matters too. Holding the circle's start point instead, where joint 2 is at −18°, the same push moves the elbow about 1&nbsp;mm with or
+    without the null-space term. With joint 2 that close to zero, joints 1 and 3 nearly line up again, and the self-motion becomes mostly the two of
+    them counter-rotating, which hardly moves the elbow. That is why <em>Hold</em> in Figure&nbsp;5 returns to the ready pose.
+  </p>
+
+  <h2 id="integrators">Stiff actuators and integrators</h2>
+  <p>
+    Menagerie ships the FR3 with position actuators: a stiff PD loop at each joint, with gains \(k_p\) up to 4500&nbsp;N·m/rad and
+    \(k_v\) up to 450&nbsp;N·m·s/rad, and forces clipped to the torque limits. It also sets MuJoCo's <code>implicitfast</code>
+    integrator. The reason is that MuJoCo's default, semi-implicit <code>Euler</code>, treats joint damping implicitly but
+    the actuators' velocity gain explicitly. A large \(k_v\) acting on a small inertia, such as the wrist's roughly 0.1&nbsp;kg·m², then needs a very small
+    timestep. <code>implicitfast</code> includes the actuators' velocity derivatives in the implicit step.
+  </p>
+
+  <figure class="interactive" id="fig-integrators">
+    <p class="fig-status" hidden></p>
+    <div class="fig-body split">
+      <div class="view" aria-label="FR3 under position control"></div>
+      <div class="panel"><canvas class="vel" aria-label="Joint velocity plot"></canvas></div>
+    </div>
+    <div class="controls">
+      <span class="seg" data-name="integ">
+        <button type="button" data-value="euler" aria-pressed="true">Euler</button>
+        <button type="button" data-value="implicitfast" aria-pressed="false">implicitfast</button>
+      </span>
+      <span>timestep</span>
+      <span class="seg" data-name="dt">
+        <button type="button" data-value="1" aria-pressed="false">1 ms</button>
+        <button type="button" data-value="2" aria-pressed="true">2 ms</button>
+        <button type="button" data-value="4" aria-pressed="false">4 ms</button>
+      </span>
+      <button type="button" name="reset">Restart</button>
+    </div>
+    <div class="readout"></div>
+    <figcaption>
+      <span class="fig-num">Figure 6.</span>
+      Menagerie's position-controlled FR3. Every 1.5&nbsp;s each joint target steps by 0.2&nbsp;rad around the ready pose. Watch the
+      velocity plot rather than the arm: the chatter is fast but small.
+    </figcaption>
+  </figure>
+
+  <p>
+    Nothing explodes, which is the subtle part. With <code>Euler</code> at Menagerie's 2&nbsp;ms timestep, the explicit damping overshoots on every step,
+    but the force limits clip it. The result is a bounded chatter: every joint's velocity flips sign on every step, and the actuators
+    sit at their force limits 75–100% of the time. The arm never settles within 0.01&nbsp;rad of its targets, and the error grows with the
+    timestep. At 1&nbsp;ms, Euler settles, though joint 7 still buzzes against its limit. <code>implicitfast</code> settles in
+    0.38&nbsp;s at every timestep up to 8&nbsp;ms. Its remaining 5.4&nbsp;mrad error is gravity: a position actuator without gravity compensation stops where
+    \(k_p e = g(q)\), and joint 4 carries 19&nbsp;N·m against a \(k_p\) of 3500&nbsp;N·m/rad.
+  </p>
+
+  <h2 id="try-it">Try it yourself</h2>
+  <ul>
+    <li><a href="js/fr3core.js"><code>js/fr3core.js</code></a>: Jacobians, damped least squares, null-space projection and the three
+      controllers. The figures and the experiment scripts both import this one file.</li>
+    <li><a href="tools/experiments.mjs"><code>tools/experiments.mjs</code></a>: produces every number in the text.</li>
+    <li><a href="tools/check_wasm_vs_python.py"><code>tools/check_wasm_vs_python.py</code></a>: checks MuJoCo's WebAssembly build
+      against its Python bindings on the FR3.</li>
+    <li><a href="tools/build_web_assets.py"><code>tools/build_web_assets.py</code></a>: builds the mesh-free physics models and the
+      compressed meshes from Menagerie, and checks the dynamics are unchanged.</li>
+  </ul>
+<pre><code>npm install                         # MuJoCo's WebAssembly build, for the Node scripts
+node tools/experiments.mjs          # all experiments
+pip install mujoco
+python tools/check_wasm_vs_python.py</code></pre>
+  <p>The core of operational-space control in <code>fr3core.js</code>:</p>
+<pre><code>const Lam = invSPD(sandwich(J, 6, N, invSPD(M, N)), 6);   // Λ = (J M⁻¹ Jᵀ)⁻¹
+const F = mulMV(Lam, 6, 6, acc);                           // Λ (ẍ_d + ω² e + 2ω ė)
+const tau = mulMtV(J, 6, N, F);                            // Jᵀ F, then + null space + c + g</code></pre>
+
+  <h2 id="caveats">What the model leaves out</h2>
+  <p>
+    This is a simulation of a published model, not the robot. The physics models here drop all geometry, so there are no contacts or
+    self-collisions. Every FR3 link has explicit inertial parameters, so the dynamics are unchanged, and the build script checks this.
+    Friction is MuJoCo's simple joint <code>frictionloss</code>. There is no motor electrical dynamics, sensor noise, communication delay
+    or joint flexibility, and the real FR3's interface enforces rate and safety limits that these controllers ignore. Treat the numbers as
+    showing how the methods compare, not as predictions for hardware.
+  </p>
+
+  <h2 id="acknowledgments">Acknowledgments</h2>
+  <p>
+    The FR3 model and meshes are from MuJoCo Menagerie (Apache-2.0, see <code>assets/MENAGERIE_LICENSE</code>), derived from
+    Franka Robotics' public description. Thanks to … (add the people who helped).
+  </p>
+
+  <h2 id="references">References</h2>
+  <ol class="refs">
+    <li id="ref-mujoco">E. Todorov, T. Erez, Y. Tassa. MuJoCo: A physics engine for model-based control. <em>IROS</em>, 2012.</li>
+    <li id="ref-menagerie">K. Zakka, Y. Tassa, and MuJoCo Menagerie contributors. MuJoCo Menagerie: A collection of high-quality simulation models for MuJoCo. 2022. <a href="https://github.com/google-deepmind/mujoco_menagerie">github.com/google-deepmind/mujoco_menagerie</a></li>
+    <li id="ref-haddadin">S. Haddadin et al. The Franka Emika Robot: A reference platform for robotics research and education. <em>IEEE Robotics &amp; Automation Magazine</em>, 2022.</li>
+    <li id="ref-he">Y. He, S. Liu. Analytical inverse kinematics for Franka Emika Panda: a geometrical solver for 7-DOF manipulators with unconventional design. <em>ICCMA</em>, 2021.</li>
+    <li id="ref-yoshikawa">T. Yoshikawa. Manipulability of robotic mechanisms. <em>International Journal of Robotics Research</em>, 4(2), 1985.</li>
+    <li id="ref-wampler">C. W. Wampler. Manipulator inverse kinematic solutions based on vector formulations and damped least-squares methods. <em>IEEE Transactions on Systems, Man, and Cybernetics</em>, 16(1), 1986.</li>
+    <li id="ref-nakamura">Y. Nakamura, H. Hanafusa. Inverse kinematic solutions with singularity robustness for robot manipulator control. <em>Journal of Dynamic Systems, Measurement, and Control</em>, 108(3), 1986.</li>
+    <li id="ref-klein">C. A. Klein, C.-H. Huang. Review of pseudoinverse control for use with kinematically redundant manipulators. <em>IEEE Transactions on Systems, Man, and Cybernetics</em>, 13(2), 1983.</li>
+    <li id="ref-ott">C. Ott. <em>Cartesian Impedance Control of Redundant and Flexible-Joint Robots.</em> Springer, 2008.</li>
+    <li id="ref-khatib">O. Khatib. A unified approach for motion and force control of robot manipulators: The operational space formulation. <em>IEEE Journal on Robotics and Automation</em>, 3(1), 1987.</li>
+  </ol>
+
+  <h2 id="citation">Citation</h2>
+<pre><code>@misc{yourname2026onejoint,
+  author = {Your Name},
+  title  = {One Joint Too Many: Redundancy, Dynamics and Torque Control of the Franka FR3},
+  year   = {2026},
+  url    = {https://your-site.example/fr3/}
+}</code></pre>
+</main>
+
+<footer>Figures run MuJoCo in your browser; nothing is sent anywhere.</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script type="module" src="js/main.js"></script>
+<script>
+  if (window.renderMathInElement) {
+    renderMathInElement(document.body, {
+      delimiters: [{ left: "$$", right: "$$", display: true }, { left: "\\(", right: "\\)", display: false }],
+      ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code", "option"],
+    });
+  }
+  document.querySelectorAll("main h2[id], main h3[id]").forEach((h) => {
+    const a = document.createElement("a");
+    a.className = "anchor"; a.href = `#${h.id}`; a.textContent = "#"; a.setAttribute("aria-label", "Link to this section");
+    h.appendChild(a);
+  });
+  document.querySelector(".theme-toggle").addEventListener("click", () => {
+    const root = document.documentElement;
+    const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    root.dataset.theme = dark ? "light" : "dark";
+    try { localStorage.setItem("theme", root.dataset.theme); } catch (e) {}
+    document.dispatchEvent(new Event("themechange"));
+  });
+</script>
+</body>
+</html>
