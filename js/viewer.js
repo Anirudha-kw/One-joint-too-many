@@ -1,6 +1,7 @@
 // viewer.js — three.js rendering of the FR3, driven by MuJoCo body poses.
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
@@ -41,30 +42,76 @@ export function loadMeshes(base = "assets/") {
 
 // ---------------------------------------------------------------- robot
 
+// Schematic motor per joint: a small puck centred
+// on the real joint axis (the body's z axis through its origin). Menagerie's FR3 has no internal
+// geometry, so the sizes are illustrative.
+// z moves a motor along its own axis, so motors whose axes cross at one point don't overlap.
+const DRIVES = {
+  fr3_link1: { r: 0.03, len: 0.04, z: -0.09 }, fr3_link2: { r: 0.03, len: 0.04, z: 0 },
+  fr3_link3: { r: 0.028, len: 0.036, z: -0.09 }, fr3_link4: { r: 0.028, len: 0.036, z: 0 },
+  fr3_link5: { r: 0.022, len: 0.03, z: -0.15 }, fr3_link6: { r: 0.022, len: 0.03, z: 0 }, fr3_link7: { r: 0.02, len: 0.026, z: 0 },
+};
+
+const driveCache = new Map();
+function driveGroup(spec, colors, ghost) {
+  const key = `${spec.r}|${spec.len}`;
+  if (!driveCache.has(key)) {
+    const can = new THREE.CylinderGeometry(spec.r, spec.r, spec.len, 40);
+    can.rotateX(Math.PI / 2);
+    driveCache.set(key, { can });
+  }
+  const geo = driveCache.get(key);
+  const mat = (color, rough) => new THREE.MeshStandardMaterial({
+    color, roughness: rough, metalness: 0.1, envMapIntensity: 0.8,
+    transparent: ghost, opacity: ghost ? 0.1 : 1, depthWrite: !ghost,
+  });
+  const g = new THREE.Group();
+  const can = new THREE.Mesh(geo.can, mat(colors.motor, 0.5));
+  can.position.z = spec.z;
+  g.add(can);
+  return g;
+}
+
 export class Robot {
+  // opts.style: "xray" (translucent shell, solid motors; the default) or "solid".
   constructor(mj, model, parts, opts = {}) {
     this.group = new THREE.Group();
     this.bodies = new Map();
     const ghost = !!opts.ghost;
-    for (const part of parts) {
-      const id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY.value, part.body);
-      if (id < 0) continue;
+    const xray = (opts.style || "xray") === "xray";
+    const ensureBody = (id) => {
       if (!this.bodies.has(id)) {
         const g = new THREE.Group();
-        g.matrixAutoUpdate = true;
         this.bodies.set(id, g);
         this.group.add(g);
       }
+      return this.bodies.get(id);
+    };
+    for (const part of parts) {
+      const id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY.value, part.body);
+      if (id < 0) continue;
       const color = new THREE.Color().setRGB(...part.color, THREE.SRGBColorSpace);
-      if (opts.tint) color.lerp(new THREE.Color(opts.tint), opts.tintAmount ?? 0.5);
+      if (xray) color.lerp(new THREE.Color(0xb9b7b0), 0.55);
+      const translucent = ghost || xray;
+      const opacity = ghost ? (opts.opacity ?? 0.1) : 0.22;
       const mat = new THREE.MeshStandardMaterial({
-        color, roughness: 0.6, metalness: 0.0, side: THREE.DoubleSide,
-        transparent: ghost, opacity: ghost ? opts.opacity ?? 0.22 : 1, depthWrite: !ghost,
+        color, roughness: 0.5, metalness: 0.0, side: THREE.DoubleSide, envMapIntensity: 0.7,
+        transparent: translucent, opacity: translucent ? opacity : 1, depthWrite: !translucent,
       });
+      mat.userData.base = color.clone();
+      mat.userData.opacity = mat.opacity;
       const mesh = new THREE.Mesh(part.geometry, mat);
       mesh.castShadow = !ghost;
       mesh.receiveShadow = false; // self-shadowing on these thin shells causes acne
-      this.bodies.get(id).add(mesh);
+      mesh.renderOrder = 1;
+      ensureBody(id).add(mesh);
+    }
+    if (xray) {
+      const colors = { motor: 0x2a2b2f };
+      for (const [name, spec] of Object.entries(DRIVES)) {
+        const id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY.value, name);
+        if (id >= 0) ensureBody(id).add(driveGroup(spec, colors, ghost));
+      }
     }
     if (opts.offset) this.group.position.set(...opts.offset);
   }
@@ -78,6 +125,25 @@ export class Robot {
   }
   // Copy poses from a saved snapshot { xpos, xquat } (Float64Arrays).
   updateFrom(snap) { this.update(snap); }
+  // Tint one body's meshes toward `color` (null restores the original colors).
+  highlight(bodyId, color, amount = 0.75) {
+    const g = this.bodies.get(bodyId);
+    if (!g) return;
+    g.traverse((o) => {
+      if (!o.isMesh) return;
+      const m = o.material;
+      if (!m.userData.base) return;
+      m.color.copy(m.userData.base);
+      m.emissive.setRGB(0, 0, 0);
+      m.opacity = m.userData.opacity;
+      if (color) {
+        const c = new THREE.Color(color);
+        m.color.lerp(c, amount);
+        m.emissive.copy(c).multiplyScalar(0.25);
+        if (m.transparent) m.opacity = Math.max(m.opacity, 0.45);
+      }
+    });
+  }
 }
 
 // ---------------------------------------------------------------- scene
@@ -85,14 +151,22 @@ export class Robot {
 export class Scene3D {
   constructor(container, opts = {}) {
     this.container = container;
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    // Transparent canvas: the robot sits directly on the page background.
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    this.renderer.setClearColor(0x000000, 0);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.NeutralToneMapping;
+    this.renderer.toneMappingExposure = 0.8;
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
+    // Soft studio lighting from a generated room environment.
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
     THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
     this.camera = new THREE.PerspectiveCamera(opts.fov || 35, 1, 0.01, 50);
     this.camera.up.set(0, 0, 1);
@@ -107,29 +181,22 @@ export class Scene3D {
     this.controls.addEventListener("change", () => this.requestRender());
     this.home = { camera: this.camera.position.clone(), target: this.controls.target.clone() };
 
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x6f6d66, 1.1));
-    const sun = new THREE.DirectionalLight(0xffffff, 2.0);
-    const fill = new THREE.DirectionalLight(0xffffff, 0.5);
-    fill.position.set(-1.5, 1.2, 1.0);
-    this.scene.add(fill);
-    sun.position.set(1.5, -1.0, 3.0);
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8880, 0.25));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+    sun.position.set(0.6, -0.4, 3.0);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.radius = 6;
     Object.assign(sun.shadow.camera, { left: -1.5, right: 1.5, top: 1.5, bottom: -1.5, near: 0.5, far: 8 });
     sun.shadow.bias = -0.0005;
     sun.shadow.normalBias = 0.02;
     this.scene.add(sun);
 
-    this.floor = new THREE.Mesh(
-      new THREE.CircleGeometry(opts.floorRadius || 6, 96),
-      new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0 })
-    );
+    // No floor, only the shadow it would catch.
+    this.floor = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), new THREE.ShadowMaterial({ opacity: 0.12 }));
     this.floor.receiveShadow = true;
     this.floor.position.z = -0.001;
     this.scene.add(this.floor);
-    this.grid = new THREE.PolarGridHelper(1.5, 8, 6, 64);
-    this.grid.rotation.x = Math.PI / 2;
-    this.scene.add(this.grid);
 
     this.applyTheme();
     document.addEventListener("themechange", () => this.applyTheme());
@@ -140,11 +207,9 @@ export class Scene3D {
     this.resize();
   }
   applyTheme() {
-    this.scene.background = new THREE.Color(css("--bg-sunken"));
-    this.floor.material.color = new THREE.Color(css("--floor"));
-    const gc = new THREE.Color(css("--grid"));
-    this.grid.material.color = gc;
-    this.grid.material.vertexColors = false;
+    const bg = new THREE.Color(css("--bg"));
+    const dark = bg.r + bg.g + bg.b < 1.2;
+    this.floor.material.opacity = dark ? 0.28 : 0.13;
     this.requestRender();
   }
   resize() {

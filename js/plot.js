@@ -126,7 +126,7 @@ export function drawHeatmap(canvas, M, n, o = {}) {
   const { ctx } = setupCanvas(canvas, size + 22);
   const L = 22, T = 18, cell = (size - L) / n;
   const vmax = o.vmax || Math.max(...M.map(Math.abs));
-  const pos = css("--heat-pos"), neg = css("--heat-neg"), bg = css("--bg-raised");
+  const pos = css("--heat-pos"), neg = css("--heat-neg"), bg = css("--grid");
   ctx.font = "11px Inter, system-ui, sans-serif";
   ctx.fillStyle = css("--ink-2");
   if (o.title) ctx.fillText(o.title, L, 12);

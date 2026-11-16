@@ -10,7 +10,7 @@
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
   <link rel="stylesheet" href="css/style.css">
   <script type="importmap">
@@ -95,25 +95,29 @@
     no simple closed form. Analytical solvers exist, but they fix one joint angle and solve for the rest&nbsp;[<a href="#ref-he">4</a>].
   </p>
 
-  <figure class="interactive" id="fig-chain">
-    <p class="fig-status" hidden></p>
-    <div class="fig-body"><div class="view" aria-label="3D view of the FR3. Drag to orbit, scroll to zoom."></div></div>
-    <div class="controls">
-      <div class="joint-sliders"></div>
-      <span class="seg" data-name="pose">
-        <button type="button" data-value="ready" aria-pressed="true">Ready</button>
-        <button type="button" data-value="home" aria-pressed="false">Menagerie home</button>
-        <button type="button" data-value="reach" aria-pressed="false">Reaching</button>
-      </span>
-      <label><input type="checkbox" name="axes" checked> joint axes</label>
-      <button type="button" name="view">Reset view</button>
+  <figure class="fig" id="fig-chain">
+    <div class="fig-grid">
+      <div class="stage"><p class="fig-status" hidden></p><div class="view" aria-label="3D view of the FR3. Drag to orbit, scroll to zoom."></div></div>
+      <div class="side">
+        <div class="ctl-row"><span class="lab">Pose</span>
+          <span class="seg" data-name="pose">
+            <button type="button" data-value="ready" aria-pressed="true">Ready</button>
+            <button type="button" data-value="home" aria-pressed="false">Menagerie home</button>
+            <button type="button" data-value="reach" aria-pressed="false">Reaching</button>
+          </span>
+        </div>
+        <div class="sliders joint-sliders"></div>
+        <div class="readout"></div>
+        <p class="note"></p>
+        <label class="check"><input type="checkbox" name="axes"> Joint axes</label>
+        <div class="buttons"><button type="button" name="view">Reset view</button></div>
+      </div>
     </div>
-    <div class="readout"></div>
     <figcaption>
-      <span class="fig-num">Figure 1.</span>
-      The FR3 with its seven joint axes, colored to match the sliders. Drag to orbit and scroll to zoom. Switch to
-      <em>Menagerie home</em> and note that the red and yellow axes (joints 1 and 3) line up. The triad marks the flange frame,
-      where a tool would be bolted on.
+      <strong>Figure 1. The kinematic chain.</strong> The FR3 shell is drawn translucent so the seven joint motors show through, drawn
+      schematically on the real joint axes. Tick <em>Joint axes</em>
+      to show the axes in the slider colors; at <em>Menagerie home</em> the red and yellow axes (joints 1 and 3) line up. The triad
+      marks the flange frame, where a tool would be bolted on. Drag to orbit and scroll to zoom.
     </figcaption>
   </figure>
 
@@ -124,25 +128,21 @@
     configurations that all put the hand in exactly the same pose.
   </p>
 
-  <figure class="interactive" id="fig-selfmotion">
-    <p class="fig-status" hidden></p>
-    <div class="fig-body split">
-      <div class="view" aria-label="FR3 moving along its self-motion with the hand fixed"></div>
-      <div class="panel">
+  <figure class="fig" id="fig-selfmotion">
+    <div class="fig-grid">
+      <div class="stage"><p class="fig-status" hidden></p><div class="view" aria-label="FR3 moving along its self-motion with the hand fixed"></div></div>
+      <div class="side">
+        <label class="row"><span class="lab">Self-motion</span><input type="range" name="s" min="0" max="100" step="1" value="50"><output for="s"></output></label>
+        <div class="buttons"><button type="button" name="play">Sweep</button></div>
+        <div class="readout"></div>
         <canvas class="manip" aria-label="Manipulability along the self-motion"></canvas>
         <canvas class="bars" aria-label="Joint positions within limits"></canvas>
       </div>
     </div>
-    <div class="controls">
-      <label>position along the self-motion <input class="wide" type="range" name="s" min="0" max="100" step="1" value="50"></label>
-      <button type="button" name="play">Sweep</button>
-    </div>
-    <div class="readout"></div>
     <figcaption>
-      <span class="fig-num">Figure 2.</span>
-      The hand stays at the ready pose while the arm moves through its self-motion. The blue curve is the path of the elbow,
-      and the faint arms are the two ends, where joint 6 reaches its limit. The configurations were traced by following the null
-      space of \(J\) from the ready pose and correcting the hand pose at every step.
+      <strong>Figure 2. Moving the arm without moving the hand.</strong> The hand stays at the ready pose while the arm moves through
+      its self-motion. The blue curve is the path of the elbow, and the faint arms are the two ends, where joint 6 reaches its limit.
+      The configurations were traced by following the null space of \(J\) from the ready pose and correcting the hand pose at every step.
     </figcaption>
   </figure>
 
@@ -173,33 +173,36 @@
     closed loop, the joints generally do not come back to where they started&nbsp;[<a href="#ref-klein">8</a>].
   </p>
 
-  <figure class="interactive" id="fig-drift">
-    <p class="fig-status" hidden></p>
-    <div class="fig-body">
-      <div class="view" aria-label="Two FR3 arms tracing the same circle with different IK">
-        <div class="view-labels"><span>pseudo-inverse only</span><span>with null-space posture</span></div>
+  <figure class="fig" id="fig-drift">
+    <div class="fig-grid stage-wide">
+      <div class="stage"><p class="fig-status" hidden></p>
+        <div class="view wide" aria-label="Two FR3 arms tracing the same circle with different IK">
+          <div class="view-labels"><span>pseudo-inverse only</span><span>with null-space posture</span></div>
+        </div>
+      </div>
+      <div class="side">
+        <div class="ctl-row"><span class="lab">Lap time</span>
+          <span class="seg" data-name="period">
+            <button type="button" data-value="2" aria-pressed="true">2 s</button>
+            <button type="button" data-value="3" aria-pressed="false">3 s</button>
+          </span>
+        </div>
+        <div class="ctl-row"><span class="lab">Speed</span>
+          <span class="seg" data-name="speed">
+            <button type="button" data-value="1" aria-pressed="true">1×</button>
+            <button type="button" data-value="4" aria-pressed="false">4×</button>
+          </span>
+          <span class="buttons"><button type="button" name="reset">Restart</button></span>
+        </div>
+        <div class="readout"></div>
+        <canvas class="bars-a"></canvas>
+        <canvas class="bars-b"></canvas>
       </div>
     </div>
-    <div class="bars-pair"><canvas class="bars-a"></canvas><canvas class="bars-b"></canvas></div>
-    <div class="controls">
-      <span>lap time</span>
-      <span class="seg" data-name="period">
-        <button type="button" data-value="2" aria-pressed="true">2 s</button>
-        <button type="button" data-value="3" aria-pressed="false">3 s</button>
-      </span>
-      <span>speed</span>
-      <span class="seg" data-name="speed">
-        <button type="button" data-value="1" aria-pressed="true">1×</button>
-        <button type="button" data-value="4" aria-pressed="false">4×</button>
-      </span>
-      <button type="button" name="reset">Restart</button>
-    </div>
-    <div class="readout"></div>
     <figcaption>
-      <span class="fig-num">Figure 3.</span>
-      Both arms trace the same 0.2&nbsp;m circle with fixed hand orientation, using the same damped-least-squares IK at 500&nbsp;Hz.
-      Joints stop at their limits, as on the real robot. The right arm adds the posture term. The bars show each joint's position
-      within its range and turn red within 3% of a limit. Readouts list left | right.
+      <strong>Figure 3. Pseudo-inverse drift.</strong> Both arms trace the same 0.2&nbsp;m circle with fixed hand orientation, using the
+      same damped-least-squares IK at 500&nbsp;Hz. Joints stop at their limits, as on the real robot. The right arm adds the posture
+      term. The bars show each joint's position within its range and turn red within 3% of a limit. Readouts list left | right.
     </figcaption>
   </figure>
 
@@ -225,33 +228,33 @@
     motor accelerates is its own rotor.
   </p>
 
-  <figure class="interactive" id="fig-dynamics">
-    <p class="fig-status" hidden></p>
-    <div class="fig-body split">
-      <div class="view" aria-label="FR3 in a chosen pose with an optional payload"></div>
-      <div class="panel">
+  <figure class="fig" id="fig-dynamics">
+    <div class="fig-grid">
+      <div class="stage"><p class="fig-status" hidden></p><div class="view" aria-label="FR3 in a chosen pose with an optional payload"></div></div>
+      <div class="side">
+        <div class="ctl-row"><span class="lab">Pose</span>
+          <span class="seg" data-name="pose">
+            <button type="button" data-value="ready" aria-pressed="true">Ready</button>
+            <button type="button" data-value="home" aria-pressed="false">Home</button>
+            <button type="button" data-value="reach" aria-pressed="false">Reaching</button>
+            <button type="button" data-value="stretched" aria-pressed="false">Stretched</button>
+          </span>
+        </div>
+        <div class="sliders">
+          <label class="row"><span class="lab">Joint 2</span><input type="range" name="dq2" min="-105" max="105" step="1" value="-45"><output for="dq2"></output></label>
+          <label class="row"><span class="lab">Joint 4</span><input type="range" name="dq4" min="-176" max="-7" step="1" value="-135"><output for="dq4"></output></label>
+          <label class="row"><span class="lab">Payload</span><input type="range" name="payload" min="0" max="5" step="0.25" value="0"><output for="payload"></output></label>
+        </div>
+        <label class="check"><input type="checkbox" name="armature" checked> Include motor inertia</label>
+        <div class="readout"></div>
         <canvas class="heat" aria-label="Mass matrix heatmap"></canvas>
         <canvas class="grav" aria-label="Gravity torque relative to limits"></canvas>
       </div>
     </div>
-    <div class="controls">
-      <span class="seg" data-name="pose">
-        <button type="button" data-value="ready" aria-pressed="true">Ready</button>
-        <button type="button" data-value="home" aria-pressed="false">Home</button>
-        <button type="button" data-value="reach" aria-pressed="false">Reaching</button>
-        <button type="button" data-value="stretched" aria-pressed="false">Stretched</button>
-      </span>
-      <label>q₂ <input type="range" name="dq2" min="-105" max="105" step="1" value="-45"><output for="dq2"></output></label>
-      <label>q₄ <input type="range" name="dq4" min="-176" max="-7" step="1" value="-135"><output for="dq4"></output></label>
-      <label>payload <input type="range" name="payload" min="0" max="5" step="0.25" value="0"><output for="payload"></output></label>
-      <label><input type="checkbox" name="armature" checked> include motor inertia</label>
-    </div>
-    <div class="readout"></div>
     <figcaption>
-      <span class="fig-num">Figure 4.</span>
-      The mass matrix and the torque each joint needs to hold the arm still, as a fraction of its limit (the red tick is 100%).
-      Untick <em>include motor inertia</em> to see the links' contribution alone, and watch the wrist diagonal nearly vanish. The payload
-      is a point mass 5&nbsp;cm beyond the flange.
+      <strong>Figure 4. What the motors feel.</strong> The mass matrix and the torque each joint needs to hold the arm still, as a
+      fraction of its limit (the red tick is 100%). Untick <em>Include motor inertia</em> to see the links' contribution alone, and
+      watch the wrist diagonal nearly vanish. The payload is a point mass 5&nbsp;cm beyond the flange.
     </figcaption>
   </figure>
 
@@ -281,11 +284,32 @@
     "dynamically consistent" version&nbsp;[<a href="#ref-khatib">10</a>].
   </p>
 
-  <figure class="interactive" id="fig-control">
-    <p class="fig-status" hidden></p>
-    <div class="fig-body split">
-      <div class="view" aria-label="Torque-controlled FR3 tracking a target"></div>
-      <div class="panel">
+  <figure class="fig" id="fig-control">
+    <div class="fig-grid">
+      <div class="stage"><p class="fig-status" hidden></p><div class="view" aria-label="Torque-controlled FR3 tracking a target"></div></div>
+      <div class="side">
+        <div class="ctl-row">
+          <span class="seg" data-name="kind">
+            <button type="button" data-value="ji" aria-pressed="false">Joint impedance</button>
+            <button type="button" data-value="ci" aria-pressed="false">Cartesian impedance</button>
+            <button type="button" data-value="osc" aria-pressed="true">Operational space</button>
+          </span>
+        </div>
+        <div class="ctl-row"><span class="lab">Target</span>
+          <span class="seg" data-name="motion">
+            <button type="button" data-value="circle" aria-pressed="true">Circle</button>
+            <button type="button" data-value="hold" aria-pressed="false">Hold</button>
+          </span>
+        </div>
+        <label class="row"><span class="lab">Payload</span><input type="range" name="payload" min="0" max="2" step="0.1" value="0"><output for="payload"></output></label>
+        <label class="check"><input type="checkbox" name="nullspace" checked> Null-space posture</label>
+        <div class="buttons">
+          <button type="button" name="push-hand">Push hand (30 N)</button>
+          <button type="button" name="push-elbow">Push elbow (20 N)</button>
+          <button type="button" name="reset">Reset</button>
+        </div>
+        <p class="note"></p>
+        <div class="readout"></div>
         <canvas class="err" aria-label="Hand error plot"></canvas>
         <canvas class="tau" aria-label="Joint torque plot"></canvas>
         <div class="legend">
@@ -293,29 +317,11 @@
         </div>
       </div>
     </div>
-    <div class="controls">
-      <span class="seg" data-name="kind">
-        <button type="button" data-value="ji" aria-pressed="false">Joint impedance</button>
-        <button type="button" data-value="ci" aria-pressed="false">Cartesian impedance</button>
-        <button type="button" data-value="osc" aria-pressed="true">Operational space</button>
-      </span>
-      <span class="seg" data-name="motion">
-        <button type="button" data-value="circle" aria-pressed="true">Circle</button>
-        <button type="button" data-value="hold" aria-pressed="false">Hold</button>
-      </span>
-      <label>unmodeled payload <input type="range" name="payload" min="0" max="2" step="0.1" value="0"><output for="payload"></output></label>
-      <label><input type="checkbox" name="nullspace" checked> null-space posture</label>
-      <button type="button" name="push-hand">Push hand (30 N)</button>
-      <button type="button" name="push-elbow">Push elbow (20 N)</button>
-      <button type="button" name="reset">Reset</button>
-    </div>
-    <div class="readout"></div>
     <figcaption>
-      <span class="fig-num">Figure 5.</span>
-      A full dynamic simulation at 1&nbsp;kHz, with torques clipped to the FR3's limits. The target traces a 0.15&nbsp;m circle every
-      3&nbsp;s. The controllers use the nominal model, so the payload slider adds mass they do not know about. The pushes last 0.5&nbsp;s.
-      <em>Hold</em> brings the hand back to the ready pose. Untick the null-space posture there and push the elbow to see the null space
-      with nothing controlling it.
+      <strong>Figure 5. Three torque controllers.</strong> A full dynamic simulation at 1&nbsp;kHz, with torques clipped to the FR3's
+      limits. The target traces a 0.15&nbsp;m circle every 3&nbsp;s. The controllers use the nominal model, so the payload slider adds
+      mass they do not know about. Pushes last 0.5&nbsp;s, and the pushed link turns red while they act. <em>Hold</em> brings the hand
+      back to the ready pose. Untick the null-space posture there and push the elbow to see the null space with nothing controlling it.
     </figcaption>
   </figure>
 
@@ -359,30 +365,32 @@
     timestep. <code>implicitfast</code> includes the actuators' velocity derivatives in the implicit step.
   </p>
 
-  <figure class="interactive" id="fig-integrators">
-    <p class="fig-status" hidden></p>
-    <div class="fig-body split">
-      <div class="view" aria-label="FR3 under position control"></div>
-      <div class="panel"><canvas class="vel" aria-label="Joint velocity plot"></canvas></div>
+  <figure class="fig" id="fig-integrators">
+    <div class="fig-grid">
+      <div class="stage"><p class="fig-status" hidden></p><div class="view" aria-label="FR3 under position control"></div></div>
+      <div class="side">
+        <div class="ctl-row"><span class="lab">Integrator</span>
+          <span class="seg" data-name="integ">
+            <button type="button" data-value="euler" aria-pressed="true">Euler</button>
+            <button type="button" data-value="implicitfast" aria-pressed="false">implicitfast</button>
+          </span>
+        </div>
+        <div class="ctl-row"><span class="lab">Timestep</span>
+          <span class="seg" data-name="dt">
+            <button type="button" data-value="1" aria-pressed="false">1 ms</button>
+            <button type="button" data-value="2" aria-pressed="true">2 ms</button>
+            <button type="button" data-value="4" aria-pressed="false">4 ms</button>
+          </span>
+          <span class="buttons"><button type="button" name="reset">Restart</button></span>
+        </div>
+        <p class="note"></p>
+        <div class="readout"></div>
+        <canvas class="vel" aria-label="Joint velocity plot"></canvas>
+      </div>
     </div>
-    <div class="controls">
-      <span class="seg" data-name="integ">
-        <button type="button" data-value="euler" aria-pressed="true">Euler</button>
-        <button type="button" data-value="implicitfast" aria-pressed="false">implicitfast</button>
-      </span>
-      <span>timestep</span>
-      <span class="seg" data-name="dt">
-        <button type="button" data-value="1" aria-pressed="false">1 ms</button>
-        <button type="button" data-value="2" aria-pressed="true">2 ms</button>
-        <button type="button" data-value="4" aria-pressed="false">4 ms</button>
-      </span>
-      <button type="button" name="reset">Restart</button>
-    </div>
-    <div class="readout"></div>
     <figcaption>
-      <span class="fig-num">Figure 6.</span>
-      Menagerie's position-controlled FR3. Every 1.5&nbsp;s each joint target steps by 0.2&nbsp;rad around the ready pose. Watch the
-      velocity plot rather than the arm: the chatter is fast but small.
+      <strong>Figure 6. Stiff actuators and integrators.</strong> Menagerie's position-controlled FR3. Every 1.5&nbsp;s each joint
+      target steps by 0.2&nbsp;rad around the ready pose. Watch the velocity plot rather than the arm: the chatter is fast but small.
     </figcaption>
   </figure>
 
@@ -469,6 +477,20 @@ const tau = mulMtV(J, 6, N, F);                            // Jᵀ F, then + nul
     a.className = "anchor"; a.href = `#${h.id}`; a.textContent = "#"; a.setAttribute("aria-label", "Link to this section");
     h.appendChild(a);
   });
+  // Blue fill on the left of every slider.
+  const fill = (r) => r.style.setProperty("--p", `${((r.value - r.min) / (r.max - r.min)) * 100}%`);
+  document.querySelectorAll('input[type="range"]').forEach(fill);
+  document.addEventListener("input", (e) => { if (e.target.matches('input[type="range"]')) fill(e.target); });
+  window.fillRange = fill;
+  // Underline the contents entry for the section being read.
+  const tocLinks = new Map([...document.querySelectorAll(".toc a")].map((a) => [a.getAttribute("href").slice(1), a]));
+  const seen = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting && tocLinks.has(e.target.id)) {
+      tocLinks.forEach((a) => a.classList.remove("active"));
+      tocLinks.get(e.target.id).classList.add("active");
+    }
+  }, { rootMargin: "0px 0px -70% 0px" });
+  document.querySelectorAll("main h2[id]").forEach((h) => seen.observe(h));
   document.querySelector(".theme-toggle").addEventListener("click", () => {
     const root = document.documentElement;
     const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;

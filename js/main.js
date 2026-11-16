@@ -34,6 +34,7 @@ function range(root, name, onInput) {
   const input = root.querySelector(`input[name="${name}"]`);
   const out = root.querySelector(`output[for="${name}"]`);
   const update = () => {
+    fill(input);
     const r = onInput(parseFloat(input.value));
     if (out && r !== undefined) out.textContent = r;
   };
@@ -41,6 +42,13 @@ function range(root, name, onInput) {
   update();
   return { input, update };
 }
+
+function note(root, text) {
+  const el = root.querySelector(".note");
+  if (el) el.textContent = text;
+}
+
+const fill = (input) => (window.fillRange ? window.fillRange(input) : null);
 
 function readout(root, pairs) {
   root.querySelector(".readout").innerHTML = pairs.map(([k, v]) => `<span>${k} <b>${v}</b></span>`).join("");
@@ -64,17 +72,18 @@ function jointItems(arm, q, extra = {}) {
 // ================================================================ Figure 1: the chain
 function figChain(root) {
   const arm = newArm();
-  const sc = new Scene3D(root.querySelector(".view"), { camera: [1.2, -1.1, 0.85], target: [0.2, 0, 0.4] });
+  const sc = new Scene3D(root.querySelector(".view"), { camera: [1.35, -1.12, 0.8], target: [0.18, 0, 0.45], fov: 30 });
   const robot = new Robot(MJ, arm.m, PARTS);
   sc.scene.add(robot.group);
   const axes = sc.jointAxes(7, JOINT_COLORS);
+  axes.visible(false);
   const triad = sc.triad(0.1);
   const q = READY.slice();
   const J = new Float64Array(42);
 
   const box = root.querySelector(".joint-sliders");
   box.innerHTML = q.map((x, i) =>
-    `<label><i class="dot" style="background:${JOINT_COLORS[i]}"></i>q${i + 1}
+    `<label class="row"><span class="lab"><i class="dot" style="background:${JOINT_COLORS[i]}"></i>Joint ${i + 1}</span>
       <input type="range" name="j${i}" min="${Math.ceil(arm.lo[i] * DEG * 2) / 2}" max="${Math.floor(arm.hi[i] * DEG * 2) / 2}" step="0.5" value="${(x * DEG).toFixed(1)}">
       <output for="j${i}"></output></label>`).join("");
   const inputs = q.map((_, i) => range(root, `j${i}`, (v) => { q[i] = v / DEG; update(); return `${v.toFixed(0)}°`; }).input);
@@ -88,7 +97,16 @@ function figChain(root) {
     sc.requestRender();
   }
   const setPose = (pose) => { pose.forEach((x, i) => { q[i] = x; inputs[i].value = (x * DEG).toFixed(1); inputs[i].dispatchEvent(new Event("input")); }); };
-  seg(root, "pose", (v) => setPose(v === "ready" ? READY : v === "home" ? HOME : [0, 1.2, 0, -0.5, 0, 1.75, 0.785]));
+  const POSE_NOTES = {
+    ready: "Franka's ready pose. The elbow is bent out of line and the flange points straight down.",
+    home: "Menagerie's home pose. Joint 2 is at zero, so the red and yellow axes (joints 1 and 3) are collinear.",
+    reach: "Leaning far forward. The arm is almost straight and manipulability falls to 0.005, about 17 times lower than at the ready pose.",
+  };
+  seg(root, "pose", (v) => {
+    setPose(v === "ready" ? READY : v === "home" ? HOME : [0, 1.2, 0, -0.5, 0, 1.75, 0.785]);
+    note(root, POSE_NOTES[v]);
+  });
+  note(root, POSE_NOTES.ready);
   root.querySelector('input[name="axes"]').addEventListener("change", (e) => { axes.visible(e.target.checked); sc.requestRender(); });
   root.querySelector('button[name="view"]').addEventListener("click", () => sc.resetView());
   update();
@@ -98,11 +116,11 @@ function figChain(root) {
 // ================================================================ Figure 2: self-motion
 function figSelfMotion(root) {
   const arm = newArm();
-  const sc = new Scene3D(root.querySelector(".view"), { camera: [1.35, -1.0, 0.95], target: [0.1, 0, 0.42] });
+  const sc = new Scene3D(root.querySelector(".view"), { camera: [1.5, -1.2, 0.9], target: [0.08, 0, 0.45], fov: 30 });
   const robot = new Robot(MJ, arm.m, PARTS);
   sc.scene.add(robot.group);
-  const ghostA = new Robot(MJ, arm.m, PARTS, { ghost: true, opacity: 0.16 });
-  const ghostB = new Robot(MJ, arm.m, PARTS, { ghost: true, opacity: 0.16 });
+  const ghostA = new Robot(MJ, arm.m, PARTS, { ghost: true, opacity: 0.05 });
+  const ghostB = new Robot(MJ, arm.m, PARTS, { ghost: true, opacity: 0.05 });
   sc.scene.add(ghostA.group, ghostB.group);
   const triad = sc.triad(0.1);
   const elbowPath = sc.line(css("--accent"), 4000, { opacity: 0.8 });
@@ -184,6 +202,8 @@ function figSelfMotion(root) {
 
   function update() {
     const q = path[idx].q;
+    fill(slider);
+    root.querySelector('output[for="s"]').textContent = `${Math.round((100 * idx) / (path.length - 1))}%`;
     arm.setQ(q); arm.kinematics(); arm.jacobian(J);
     robot.update(arm.d); triad.set(arm.pos(), arm.rot());
     const e = arm.poseError(p0, R0);
@@ -214,7 +234,7 @@ function figSelfMotion(root) {
 // ================================================================ Figure 3: drift under pseudo-inverse IK
 function figDrift(root) {
   const OFF = 0.6;
-  const sc = new Scene3D(root.querySelector(".view"), { camera: [2.15, -0.25, 0.95], target: [0.2, 0, 0.4] });
+  const sc = new Scene3D(root.querySelector(".view"), { camera: [3.3, -0.4, 1.05], target: [0.15, 0, 0.4], fov: 30 });
   const sims = ["plain", "posture"].map((mode, k) => {
     const arm = newArm();
     const offset = [0, k === 0 ? -OFF : OFF, 0];
@@ -318,7 +338,7 @@ function figDrift(root) {
 function figDynamics(root) {
   const arm = newArm();
   arm.m.opt.timestep = 0.001;
-  const sc = new Scene3D(root.querySelector(".view"), { camera: [1.3, -1.25, 0.8], target: [0.3, 0, 0.35] });
+  const sc = new Scene3D(root.querySelector(".view"), { camera: [1.45, -1.3, 0.75], target: [0.3, 0, 0.4], fov: 30 });
   const robot = new Robot(MJ, arm.m, PARTS);
   sc.scene.add(robot.group);
   const load = sc.sphere(0.04, css("--warn"));
@@ -366,7 +386,7 @@ function figDynamics(root) {
 function figControl(root) {
   const plant = newArm(), ctrl = newArm(), ik = newArm();
   plant.m.opt.timestep = 0.001;
-  const sc = new Scene3D(root.querySelector(".view"), { camera: [1.35, -1.1, 0.85], target: [0.3, 0, 0.38] });
+  const sc = new Scene3D(root.querySelector(".view"), { camera: [1.42, -1.2, 0.8], target: [0.3, 0, 0.42], fov: 30 });
   const robot = new Robot(MJ, plant.m, PARTS);
   sc.scene.add(robot.group);
   const targetBall = sc.sphere(0.016, css("--accent"));
@@ -478,7 +498,11 @@ function figControl(root) {
       const b = push.body, x = plant.d.xpos;
       pushArrow.visible = true;
       setArrow(pushArrow, [x[3 * b], x[3 * b + 1] - 0.25, x[3 * b + 2]], [0, 1, 0], 0.22);
-    } else pushArrow.visible = false;
+      if (!push.lit) { robot.highlight(b, css("--warn")); push.lit = true; }
+    } else {
+      pushArrow.visible = false;
+      if (push && push.lit) { robot.highlight(push.body, null); push.lit = false; }
+    }
     errPlot.draw(t); tauPlot.draw(t);
     const e = plant.d.xpos;
     const el = [e[3 * link4], e[3 * link4 + 1], e[3 * link4 + 2]];
@@ -495,7 +519,13 @@ function figControl(root) {
     sc.requestRender();
   }
 
-  seg(root, "kind", (v) => { cfg.kind = v; ik.setQ(plant.q()); peakErr = 0; });
+  const KIND_NOTES = {
+    ji: "IK turns the target into joint angles, and each joint is a spring-damper toward them. It reacts only to error, so it lags the moving target.",
+    ci: "A spring at the hand: pose error makes a wrench, and Jᵀ turns it into joint torques. Push the hand and it gives like the spring you chose.",
+    osc: "Cancels the arm's inertia at the hand and feeds forward the target's acceleration, so every direction responds the same way.",
+  };
+  seg(root, "kind", (v) => { cfg.kind = v; ik.setQ(plant.q()); peakErr = 0; note(root, KIND_NOTES[v]); });
+  note(root, KIND_NOTES[cfg.kind]);
   seg(root, "motion", setMotion);
   range(root, "payload", (v) => { plant.m.body_mass[pid] = v; return `${v.toFixed(2)} kg`; });
   root.querySelector('input[name="nullspace"]').addEventListener("change", (e) => { cfg.nullspace = e.target.checked; });
@@ -524,7 +554,7 @@ function figControl(root) {
 function figIntegrators(root) {
   const m = MJ.MjModel.from_xml_string(XML_P);
   const d = new MJ.MjData(m);
-  const sc = new Scene3D(root.querySelector(".view"), { camera: [1.05, -0.85, 0.8], target: [0.3, 0, 0.42] });
+  const sc = new Scene3D(root.querySelector(".view"), { camera: [1.3, -1.05, 0.75], target: [0.2, 0, 0.45], fov: 30 });
   const robot = new Robot(MJ, m, PARTS);
   sc.scene.add(robot.group);
   const plot = new TimePlot(root.querySelector("canvas.vel"), {
@@ -566,7 +596,12 @@ function figIntegrators(root) {
     readout(root, [["at a force limit (last 0.5 s)", `${fmt(limitPct, 0)}%`], ["velocity sign flips", `${fmt(flipRate, 0)} /s`], ["sim time", `${fmt(t, 1)} s`]]);
     sc.requestRender();
   }
-  seg(root, "integ", (v) => { cfg.integ = v; reset(); });
+  const INTEG_NOTES = {
+    euler: "Euler integrates the actuators' velocity gain explicitly. At 2 ms and above it overshoots every step, and the force limits turn that into chatter.",
+    implicitfast: "implicitfast includes the actuators' velocity gain in the implicit step, so the stiff loops settle cleanly at any of these timesteps.",
+  };
+  seg(root, "integ", (v) => { cfg.integ = v; reset(); note(root, INTEG_NOTES[v]); });
+  note(root, INTEG_NOTES[cfg.integ]);
   seg(root, "dt", (v) => { cfg.dt = parseFloat(v) / 1000; reset(); });
   root.querySelector('button[name="reset"]').addEventListener("click", reset);
   reset();
